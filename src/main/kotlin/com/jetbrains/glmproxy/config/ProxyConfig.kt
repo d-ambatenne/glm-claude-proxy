@@ -7,6 +7,7 @@ data class ProxyConfig(
     val server: ServerConfig,
     val upstream: UpstreamConfig,
     val debug: DebugConfig,
+    val anthropic: AnthropicConfig,
 ) {
     companion object {
         fun load(): ProxyConfig = from(ConfigFactory.load())
@@ -22,6 +23,12 @@ data class ProxyConfig(
             debug = DebugConfig(
                 logRequests = if (config.hasPath("debug.logRequests")) config.getBoolean("debug.logRequests") else true,
                 logBodies = if (config.hasPath("debug.logBodies")) config.getBoolean("debug.logBodies") else false,
+            ),
+            anthropic = AnthropicConfig(
+                enabled = if (config.hasPath("anthropic.enabled")) config.getBoolean("anthropic.enabled") else false,
+                model = if (config.hasPath("anthropic.model")) config.getString("anthropic.model") else "anthropic/claude-opus-4-6",
+                toolTypes = if (config.hasPath("anthropic.toolTypes"))
+                    config.getStringList("anthropic.toolTypes") else listOf("web_search", "computer", "text_editor", "bash"),
             ),
         )
     }
@@ -39,4 +46,16 @@ data class UpstreamConfig(
 data class DebugConfig(
     val logRequests: Boolean,
     val logBodies: Boolean,
+)
+
+/**
+ * Routes requests carrying Anthropic server-side tools (web_search, computer,
+ * text_editor, bash) — which GLM/OpenAI cannot satisfy — to the upstream's
+ * Anthropic-compatible /v1/messages endpoint, using a model that supports them.
+ * Reuses the upstream baseUrl + apiKey. Disabled by default.
+ */
+data class AnthropicConfig(
+    val enabled: Boolean,
+    val model: String,
+    val toolTypes: List<String>,
 )
