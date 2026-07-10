@@ -3,3 +3,6 @@ build/
 .idea/
 *.iml
 local.properties
+
+
+run.sh
