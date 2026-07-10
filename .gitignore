@@ -4,5 +4,4 @@ build/
 *.iml
 local.properties
 
-
 run.sh
