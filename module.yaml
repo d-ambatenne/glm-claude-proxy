@@ -1,0 +1,44 @@
+product: jvm/app
+
+# Keep the existing Gradle/Maven source tree in place
+# (src/main/kotlin, src/main/resources, src/test/kotlin) instead of the
+# default Amper layout (src/, test/, resources/).
+layout: maven-like
+
+settings:
+  kotlin:
+    version: 2.3.20
+    serialization:
+      format: json
+      version: 1.7.3
+  jvm:
+    jdk:
+      version: 21
+    # Entry point lives in Application.kt -> ApplicationKt. Amper only
+    # auto-detects main() when it's in a main.kt file, so set it explicitly
+    # (matches the original Gradle application { mainClass.set(...) }).
+    mainClass: com.jetbrains.glmproxy.ApplicationKt
+  ktor:
+    enabled: true
+    version: 3.5.1
+
+dependencies:
+  # server
+  - $ktor.server.cio
+  - $ktor.server.contentNegotiation
+  - $ktor.serialization.kotlinx.json
+  - $ktor.server.statusPages
+  # client
+  - $ktor.client.cio
+  - $ktor.client.contentNegotiation
+  # coroutines + logging are not part of the built-in catalog -> explicit coords
+  - org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0
+  - ch.qos.logback:logback-classic:1.5.25
+  # ProxyConfig.kt reads application.conf (HOCON) via com.typesafe.config.ConfigFactory.
+  # This is not transitive from any Ktor 3.5.1 / logback 1.5.25 artifact, so declare it.
+  - com.typesafe:config:1.4.9
+
+test-dependencies:
+  - org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0
+  - $ktor.server.testHost
+  # kotlin-test + the JUnit 5 runner are preconfigured by default.
