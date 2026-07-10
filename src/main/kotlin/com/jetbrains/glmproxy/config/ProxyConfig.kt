@@ -6,6 +6,7 @@ import com.typesafe.config.ConfigFactory
 data class ProxyConfig(
     val server: ServerConfig,
     val upstream: UpstreamConfig,
+    val debug: DebugConfig,
 ) {
     companion object {
         fun load(): ProxyConfig = from(ConfigFactory.load())
@@ -18,6 +19,10 @@ data class ProxyConfig(
                 defaultModel = config.getString("upstream.defaultModel"),
                 timeoutSeconds = config.getLong("upstream.timeoutSeconds"),
             ),
+            debug = DebugConfig(
+                logRequests = if (config.hasPath("debug.logRequests")) config.getBoolean("debug.logRequests") else true,
+                logBodies = if (config.hasPath("debug.logBodies")) config.getBoolean("debug.logBodies") else false,
+            ),
         )
     }
 }
@@ -29,4 +34,9 @@ data class UpstreamConfig(
     val apiKey: String,
     val defaultModel: String,
     val timeoutSeconds: Long,
+)
+
+data class DebugConfig(
+    val logRequests: Boolean,
+    val logBodies: Boolean,
 )
