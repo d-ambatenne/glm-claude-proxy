@@ -1,11 +1,13 @@
 package com.jetbrains.glmproxy.server
 
+import com.jetbrains.glmproxy.client.AnthropicClient
 import com.jetbrains.glmproxy.client.LiteLlmClient
 import com.jetbrains.glmproxy.config.ProxyConfig
 import com.jetbrains.glmproxy.model.anthropic.MessagesRequest
 import com.jetbrains.glmproxy.translate.RequestTranslator
 import com.jetbrains.glmproxy.translate.ResponseTranslator
 import com.jetbrains.glmproxy.translate.StreamTranslator
+import com.jetbrains.glmproxy.translate.ToolRouter
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
@@ -17,7 +19,11 @@ import java.util.UUID
 
 private val logger = LoggerFactory.getLogger("Routes")
 
-fun Application.configureRoutes(config: ProxyConfig, client: LiteLlmClient) {
+fun Application.configureRoutes(
+    config: ProxyConfig,
+    client: LiteLlmClient,
+    anthropicClient: AnthropicClient?,
+) {
     routing {
         get("/health") {
             call.respond(mapOf("status" to "ok"))
@@ -40,16 +46,61 @@ fun Application.configureRoutes(config: ProxyConfig, client: LiteLlmClient) {
         post("/v1/messages") {
             val requestBody = call.receiveText()
             val anthropicRequest = proxyJson.decodeFromString<MessagesRequest>(requestBody)
-            val openaiRequest = RequestTranslator.translate(anthropicRequest)
 
-            logger.info("Proxying request for model=${anthropicRequest.model} stream=${anthropicRequest.stream}")
-
-            if (anthropicRequest.stream == true) {
-                handleStreaming(openaiRequest, anthropicRequest.model, client)
+            // Requests with Anthropic server-side tools (web_search, computer, …)
+            // that GLM can't satisfy are forwarded raw to the Anthropic endpoint.
+            val serverSideTool = anthropicClient?.let {
+                ToolRouter.matchServerSideTool(anthropicRequest, config.anthropic)
+            }
+            if (serverSideTool != null) {
+                logger.info(
+                    "Proxying request for model={} stream={} -> anthropic (tool type: {}, model: {})",
+                    anthropicRequest.model, anthropicRequest.stream, serverSideTool, config.anthropic.model,
+                )
+                val anthropicVersion = call.request.headers["anthropic-version"]
+                if (anthropicRequest.stream == true) {
+                    handleAnthropicStreaming(requestBody, anthropicVersion, anthropicClient)
+                } else {
+                    handleAnthropicNonStreaming(requestBody, anthropicVersion, anthropicClient)
+                }
             } else {
-                handleNonStreaming(openaiRequest, anthropicRequest.model, client)
+                val openaiRequest = RequestTranslator.translate(anthropicRequest)
+                logger.info("Proxying request for model=${anthropicRequest.model} stream=${anthropicRequest.stream}")
+                if (anthropicRequest.stream == true) {
+                    handleStreaming(openaiRequest, anthropicRequest.model, client)
+                } else {
+                    handleNonStreaming(openaiRequest, anthropicRequest.model, client)
+                }
             }
         }
+    }
+}
+
+private suspend fun RoutingContext.handleAnthropicNonStreaming(
+    rawRequest: String,
+    anthropicVersion: String?,
+    anthropicClient: AnthropicClient,
+) {
+    val responseText = anthropicClient.messages(rawRequest, anthropicVersion)
+    call.respondText(responseText, contentType = ContentType.Application.Json)
+}
+
+private suspend fun RoutingContext.handleAnthropicStreaming(
+    rawRequest: String,
+    anthropicVersion: String?,
+    anthropicClient: AnthropicClient,
+) {
+    call.respondTextWriter(contentType = ContentType.Text.EventStream) {
+        // Forward the upstream SSE byte stream verbatim: each line (including the
+        // empty separator lines that delimit events) is written followed by '\n',
+        // reconstructing the exact `event: …\ndata: …\n\n` framing the Anthropic
+        // client expects.
+        anthropicClient.messagesStream(rawRequest, anthropicVersion) { line ->
+            write(line)
+            write("\n")
+            flush()
+        }
+        flush()
     }
 }
 

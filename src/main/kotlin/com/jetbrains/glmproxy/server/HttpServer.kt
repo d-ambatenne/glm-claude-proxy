@@ -1,5 +1,6 @@
 package com.jetbrains.glmproxy.server
 
+import com.jetbrains.glmproxy.client.AnthropicClient
 import com.jetbrains.glmproxy.client.LiteLlmClient
 import com.jetbrains.glmproxy.config.ProxyConfig
 import io.ktor.http.*
@@ -28,7 +29,11 @@ val proxyJson = Json {
     explicitNulls = false
 }
 
-fun Application.configureServer(config: ProxyConfig, client: LiteLlmClient) {
+fun Application.configureServer(
+    config: ProxyConfig,
+    client: LiteLlmClient,
+    anthropicClient: AnthropicClient?,
+) {
     install(ContentNegotiation) {
         json(proxyJson)
     }
@@ -62,5 +67,5 @@ fun Application.configureServer(config: ProxyConfig, client: LiteLlmClient) {
                 status)
         }
     }
-    configureRoutes(config, client)
+    configureRoutes(config, client, anthropicClient)
 }

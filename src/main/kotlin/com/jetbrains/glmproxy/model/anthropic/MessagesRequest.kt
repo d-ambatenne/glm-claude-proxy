@@ -52,4 +52,8 @@ data class Tool(
     val description: String? = null,
     // Nullable: Anthropic built-in tools (computer, text_editor, bash) omit input_schema.
     @SerialName("input_schema") val inputSchema: JsonObject? = null,
+    // The tool "type". Custom function tools have no type; Anthropic server-side tools
+    // (web_search, computer, text_editor, bash) carry a type (optionally dated, e.g.
+    // web_search_20250305). Used to route such requests to the Anthropic endpoint.
+    val type: String? = null,
 )
