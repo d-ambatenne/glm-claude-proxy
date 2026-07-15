@@ -28,15 +28,12 @@ class LiteLlmClient(private val config: UpstreamConfig, private val logBodies: B
         }
     }
 
-    private fun logSend(direction: String, marker: String, body: String) {
-        if (!logBodies) return
-        // direction: "upstream" (send) or "downstream" (receive)
-        logger.info("{} {} {}", marker, direction, body)
-    }
+    private fun logSend(marker: String, direction: String, body: String) =
+        ProxyLogger.log(logger, marker, direction, body, logBodies)
 
     suspend fun chatCompletion(request: ChatCompletionRequest): ChatCompletionResponse {
         val requestJson = proxyJson.encodeToString(ChatCompletionRequest.serializer(), request)
-        logSend("upstream", ">>>", requestJson)
+        logSend(">>>", "upstream", requestJson)
         val response = httpClient.post("${config.baseUrl}/v1/chat/completions") {
             contentType(ContentType.Application.Json)
             header("Authorization", "Bearer ${config.apiKey}")
@@ -44,12 +41,12 @@ class LiteLlmClient(private val config: UpstreamConfig, private val logBodies: B
         }
         if (response.status != HttpStatusCode.OK) {
             val body = response.bodyAsText()
-            logSend("downstream", "<<<", "[error ${response.status.value}] $body")
+            logSend("<<<", "downstream", "[error ${response.status.value}] $body")
             logger.error("Upstream error ${response.status}: $body")
             throw RuntimeException("Upstream returned ${response.status}: $body")
         }
         val responseText = response.bodyAsText()
-        logSend("downstream", "<<<", responseText)
+        logSend("<<<", "downstream", responseText)
         return proxyJson.decodeFromString(ChatCompletionResponse.serializer(), responseText)
     }
 
@@ -58,7 +55,7 @@ class LiteLlmClient(private val config: UpstreamConfig, private val logBodies: B
         onLine: suspend (String) -> Unit,
     ) {
         val requestJson = proxyJson.encodeToString(ChatCompletionRequest.serializer(), request)
-        logSend("upstream", ">>>", requestJson)
+        logSend(">>>", "upstream", requestJson)
         httpClient.preparePost("${config.baseUrl}/v1/chat/completions") {
             contentType(ContentType.Application.Json)
             header("Authorization", "Bearer ${config.apiKey}")
@@ -67,7 +64,7 @@ class LiteLlmClient(private val config: UpstreamConfig, private val logBodies: B
         }.execute { response ->
             if (response.status != HttpStatusCode.OK) {
                 val body = response.bodyAsText()
-                logSend("downstream", "<<<", "[error ${response.status.value}] $body")
+                logSend("<<<", "downstream", "[error ${response.status.value}] $body")
                 logger.error("Upstream stream error ${response.status}: $body")
                 throw RuntimeException("Upstream returned ${response.status}: $body")
             }
@@ -78,7 +75,7 @@ class LiteLlmClient(private val config: UpstreamConfig, private val logBodies: B
                 if (line.startsWith("data: ")) {
                     val payload = line.removePrefix("data: ").trim()
                     if (payload.isNotEmpty()) {
-                        logSend("downstream", "<<<", payload)
+                        logSend("<<<", "downstream", payload)
                         onLine(payload)
                     }
                 }
