@@ -50,5 +50,6 @@ data class ImageSource(
 data class Tool(
     val name: String,
     val description: String? = null,
-    @SerialName("input_schema") val inputSchema: JsonObject,
+    // Nullable: Anthropic built-in tools (computer, text_editor, bash) omit input_schema.
+    @SerialName("input_schema") val inputSchema: JsonObject? = null,
 )

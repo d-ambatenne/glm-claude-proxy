@@ -168,7 +168,7 @@ object RequestTranslator {
                 function = FunctionDef(
                     name = tool.name,
                     description = tool.description,
-                    parameters = tool.inputSchema,
+                    parameters = tool.inputSchema ?: buildJsonObject { },
                 ),
             )
         }

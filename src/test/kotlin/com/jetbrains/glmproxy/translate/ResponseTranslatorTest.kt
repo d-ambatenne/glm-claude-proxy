@@ -1,10 +1,19 @@
 package com.jetbrains.glmproxy.translate
 
+import com.jetbrains.glmproxy.model.anthropic.MessagesResponse
+import com.jetbrains.glmproxy.model.anthropic.ResponseContentBlock
+import com.jetbrains.glmproxy.model.anthropic.Usage
 import com.jetbrains.glmproxy.model.openai.*
+import com.jetbrains.glmproxy.server.proxyJson
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class ResponseTranslatorTest {
 
@@ -141,5 +150,50 @@ class ResponseTranslatorTest {
         assertEquals(1, result.content.size)
         assertEquals("text", result.content[0].type)
         assertEquals("", result.content[0].text)
+    }
+
+    /**
+     * Regression: the non-streaming response is serialized with proxyJson, which
+     * must encode default-valued fields. type="message" and role="assistant" are
+     * defaults on MessagesResponse; if encodeDefaults=false drops them, the
+     * Anthropic client deserializer throws MissingFieldException: Fields [role, type].
+     */
+    @Test
+    fun `serialized response includes required type and role fields`() {
+        val response = MessagesResponse(
+            id = "msg_resp_7",
+            content = listOf(ResponseContentBlock(type = "text", text = "hi")),
+            model = "m",
+            stopReason = "end_turn",
+            usage = Usage(inputTokens = 1, outputTokens = 2),
+        )
+        val json = proxyJson.encodeToString(MessagesResponse.serializer(), response)
+        val obj = proxyJson.parseToJsonElement(json).jsonObject
+        assertEquals("message", obj["type"]?.jsonPrimitive?.content)
+        assertEquals("assistant", obj["role"]?.jsonPrimitive?.content)
+        // content must be present too — it's non-null with no default.
+        assertTrue(obj["content"] is kotlinx.serialization.json.JsonArray)
+    }
+
+    /**
+     * Regression: request tools are serialized with proxyJson; ChatTool.type and
+     * ToolCall.type default to "function". If encodeDefaults=false drops them,
+     * litellm crashes with KeyError: 'type' when transforming the request.
+     */
+    @Test
+    fun `serialized request tools include type field`() {
+        val request = ChatCompletionRequest(
+            model = "m",
+            messages = listOf(ChatMessage(role = "user", content = JsonPrimitive("hi"))),
+            tools = listOf(
+                ChatTool(function = FunctionDef(name = "do_thing", parameters = buildJsonObject {})),
+            ),
+        )
+        val json = proxyJson.encodeToString(ChatCompletionRequest.serializer(), request)
+        val obj = proxyJson.parseToJsonElement(json).jsonObject
+        val tools = obj["tools"]?.let { it as? kotlinx.serialization.json.JsonArray }
+            ?: error("tools array missing")
+        val firstTool = tools.first().jsonObject
+        assertEquals("function", firstTool["type"]?.jsonPrimitive?.content)
     }
 }
