@@ -96,6 +96,27 @@ class RequestTranslatorTest {
     }
 
     @Test
+    fun `tool without input_schema translates to empty parameters`() {
+        // Anthropic built-in tools (computer, text_editor, bash) omit input_schema.
+        // Decoding such a request must not throw; parameters default to an empty object.
+        val request = proxyJson.decodeFromString<MessagesRequest>("""
+        {
+            "model": "m",
+            "max_tokens": 100,
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tools": [{"name": "computer", "type": "computer_20250124", "display_width_px": 1024, "display_height_px": 768}]
+        }
+        """)
+        val result = RequestTranslator.translate(request)
+
+        assertEquals(1, result.tools?.size)
+        val tool = result.tools!![0]
+        assertEquals("function", tool.type)
+        assertEquals("computer", tool.function.name)
+        assertEquals(JsonObject(emptyMap()), tool.function.parameters)
+    }
+
+    @Test
     fun `assistant tool_use message`() {
         val content = buildJsonArray {
             add(buildJsonObject {
