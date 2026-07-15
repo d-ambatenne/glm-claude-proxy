@@ -47,8 +47,8 @@ Set `"stream": true` in the request body to receive a Server-Sent Events stream.
 ## Requirements
 
 - **JDK 21** (build and runtime)
-- **Amper** — the JetBrains Kotlin toolchain, bundled in this repo as `./amper`
-  (macOS/Linux) or `amper.bat` (Windows). No separate Gradle/Maven install needed.
+- **Amper** — the JetBrains Kotlin toolchain, bundled in this repo as `./kotlin`
+  (macOS/Linux) or `kotlin.bat` (Windows). No separate Gradle/Maven install needed.
 
 ## Configuration
 
@@ -71,8 +71,8 @@ All settings live in [`src/main/resources/application.conf`](src/main/resources/
 ## Build & run
 
 ```bash
-# Run the proxy (Amper resolves the JDK, dependencies, and compiles on first run)
-./amper runJvm
+# Run the proxy (the toolchain resolves the JDK, dependencies, and compiles on first run)
+./kotlin runJvm
 ```
 
 The server starts on port `8948` (or `PROXY_PORT`).
@@ -80,7 +80,7 @@ The server starts on port `8948` (or `PROXY_PORT`).
 ### Tests
 
 ```bash
-./amper testJvm
+./kotlin testJvm
 ```
 
 Unit tests cover the request, response, and stream translators
@@ -89,7 +89,7 @@ Unit tests cover the request, response, and stream translators
 ### Build a runnable JAR
 
 ```bash
-./amper executableJarJvm   # produces a self-contained executable JAR
+./kotlin executableJarJvm   # produces a self-contained executable JAR
 ```
 
 ### Run an example request
