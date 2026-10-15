@@ -14,10 +14,12 @@ data class ProxyConfig(
         fun from(config: Config): ProxyConfig = ProxyConfig(
             server = ServerConfig(port = config.getInt("server.port")),
             upstream = UpstreamConfig(
-                baseUrl = config.getString("upstream.baseUrl"),
+                baseUrl = config.getString("upstream.baseUrl").trimEnd('/'),
                 apiKey = config.getString("upstream.apiKey"),
                 defaultModel = config.getString("upstream.defaultModel"),
                 timeoutSeconds = config.getLong("upstream.timeoutSeconds"),
+                insecureSkipTlsVerify = config.hasPath("upstream.insecureSkipTlsVerify") &&
+                    config.getBoolean("upstream.insecureSkipTlsVerify"),
             ),
             debug = DebugConfig(
                 logRequests = if (config.hasPath("debug.logRequests")) config.getBoolean("debug.logRequests") else true,
@@ -34,6 +36,7 @@ data class UpstreamConfig(
     val apiKey: String,
     val defaultModel: String,
     val timeoutSeconds: Long,
+    val insecureSkipTlsVerify: Boolean = false,
 )
 
 data class DebugConfig(
