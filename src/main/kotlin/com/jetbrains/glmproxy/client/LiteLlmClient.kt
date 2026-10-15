@@ -14,6 +14,8 @@ import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.utils.io.*
 import org.slf4j.LoggerFactory
+import java.security.cert.X509Certificate
+import javax.net.ssl.X509TrustManager
 
 class LiteLlmClient(private val config: UpstreamConfig, private val logBodies: Boolean = false) {
 
@@ -25,6 +27,15 @@ class LiteLlmClient(private val config: UpstreamConfig, private val logBodies: B
         }
         engine {
             requestTimeout = config.timeoutSeconds * 1000
+            if (config.insecureSkipTlsVerify) {
+                https { trustManager = TrustAllManager }
+            }
+        }
+    }
+
+    init {
+        if (config.insecureSkipTlsVerify) {
+            logger.warn("TLS certificate verification for upstream is DISABLED")
         }
     }
 
@@ -89,4 +100,11 @@ class LiteLlmClient(private val config: UpstreamConfig, private val logBodies: B
     fun close() {
         httpClient.close()
     }
+}
+
+/** Accepts any server certificate. Only used when upstream.insecureSkipTlsVerify is enabled. */
+private object TrustAllManager : X509TrustManager {
+    override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+    override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+    override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
 }
