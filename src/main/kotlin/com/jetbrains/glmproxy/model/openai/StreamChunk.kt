@@ -22,6 +22,8 @@ data class ChunkChoice(
 data class ChunkDelta(
     val role: String? = null,
     val content: String? = null,
+    // GLM/vLLM-style models stream their thinking phase in this field.
+    @SerialName("reasoning_content") val reasoningContent: String? = null,
     @SerialName("tool_calls") val toolCalls: List<ChunkToolCall>? = null,
 )
 

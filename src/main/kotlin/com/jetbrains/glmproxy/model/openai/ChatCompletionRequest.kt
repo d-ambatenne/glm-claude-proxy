@@ -12,6 +12,7 @@ data class ChatCompletionRequest(
     @SerialName("max_tokens") val maxTokens: Int? = null,
     val temperature: Double? = null,
     @SerialName("top_p") val topP: Double? = null,
+    @SerialName("reasoning_effort") val reasoningEffort: String? = null,
     val stop: JsonElement? = null,
     val stream: Boolean? = null,
     @SerialName("stream_options") val streamOptions: StreamOptions? = null,
@@ -31,6 +32,9 @@ data class ChatMessage(
     @SerialName("tool_calls") val toolCalls: List<ToolCall>? = null,
     @SerialName("tool_call_id") val toolCallId: String? = null,
     val name: String? = null,
+    // GLM/vLLM models return the thinking phase here; parsed so it can be logged,
+    // never sent back upstream (nulls are omitted on outgoing requests).
+    @SerialName("reasoning_content") val reasoningContent: String? = null,
 )
 
 @Serializable
