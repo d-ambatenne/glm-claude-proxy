@@ -60,19 +60,39 @@ class StreamTranslatorTest {
     }
 
     @Test
-    fun `finish chunk closes blocks and emits message_delta and message_stop`() {
+    fun `finish chunk closes blocks and message_delta comes from finish`() {
         val t = translator()
         t.processChunk(textChunk("Hi", role = "assistant"))
-        val events = t.processChunk(finishChunk("stop"))
+        val finishChunkEvents = t.processChunk(finishChunk("stop"))
+
+        // Open blocks close on the finish_reason chunk; message_delta/message_stop
+        // are deferred to finish() so usage from the trailing usage-only chunk is included.
+        assertTrue("content_block_stop" in finishChunkEvents.map { it.type })
+        assertTrue("message_delta" !in finishChunkEvents.map { it.type })
+        val events = t.finish()
 
         val types = events.map { it.type }
-        assertTrue("content_block_stop" in types)
         assertTrue("message_delta" in types)
         assertTrue("message_stop" in types)
 
         val msgDelta = events.first { it.type == "message_delta" }
         val data = proxyJson.parseToJsonElement(msgDelta.data).jsonObject
         assertEquals("end_turn", data["delta"]?.jsonObject?.get("stop_reason")?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `usage-only chunk feeds message_delta output_tokens`() {
+        val t = translator()
+        t.processChunk(textChunk("Hi", role = "assistant"))
+        t.processChunk(finishChunk("stop"))
+        t.processChunk(
+            ChatCompletionChunk(id = "c1", choices = emptyList(), usage = ChatUsage(promptTokens = 10, completionTokens = 42)),
+        )
+        val events = t.finish()
+
+        val msgDelta = events.first { it.type == "message_delta" }
+        val usage = proxyJson.parseToJsonElement(msgDelta.data).jsonObject["usage"]?.jsonObject
+        assertEquals(42, usage?.get("output_tokens")?.jsonPrimitive?.int)
     }
 
     @Test
@@ -145,10 +165,14 @@ class StreamTranslatorTest {
         val contData = proxyJson.parseToJsonElement(contEvents[0].data).jsonObject
         assertEquals("input_json_delta", contData["delta"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
 
-        // Finish with tool_calls
-        val finishEvents = t.processChunk(finishChunk("tool_calls"))
+        // Finish with tool_calls: open blocks close immediately on the finish_reason
+        // chunk; message_delta/message_stop are deferred to finish().
+        val finishChunkEvents = t.processChunk(finishChunk("tool_calls"))
+        assertTrue("content_block_stop" in finishChunkEvents.map { it.type })
+        assertTrue("message_delta" !in finishChunkEvents.map { it.type })
+
+        val finishEvents = t.finish()
         val finishTypes = finishEvents.map { it.type }
-        assertTrue("content_block_stop" in finishTypes)
         assertTrue("message_delta" in finishTypes)
         assertTrue("message_stop" in finishTypes)
 
@@ -195,5 +219,93 @@ class StreamTranslatorTest {
         val stopIdx = types.indexOf("content_block_stop")
         val startIdx = types.indexOf("content_block_start")
         assertTrue(stopIdx < startIdx, "text block should be stopped before tool block starts")
+    }
+
+    private fun reasoningChunk(text: String, finishReason: String? = null) =
+        ChatCompletionChunk(
+            id = "chunk_1",
+            choices = listOf(
+                ChunkChoice(
+                    delta = ChunkDelta(reasoningContent = text),
+                    finishReason = finishReason,
+                )
+            ),
+        )
+
+    @Test
+    fun `reasoning deltas stream as thinking block`() {
+        val t = translator()
+        val events = t.processChunk(reasoningChunk("Step 1: "))
+        val types = events.map { it.type }
+
+        assertTrue("message_start" in types)
+        assertTrue("content_block_start" in types)
+        assertTrue("content_block_delta" in types)
+
+        val start = events.first { it.type == "content_block_start" }
+        val startData = proxyJson.parseToJsonElement(start.data).jsonObject
+        assertEquals("thinking", startData["content_block"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
+
+        val delta = events.first { it.type == "content_block_delta" }
+        val deltaData = proxyJson.parseToJsonElement(delta.data).jsonObject
+        assertEquals("thinking_delta", deltaData["delta"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
+        assertEquals("Step 1: ", deltaData["delta"]?.jsonObject?.get("thinking")?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `reasoning then text closes thinking block and starts text block`() {
+        val t = translator()
+        t.processChunk(reasoningChunk("hmm"))
+        val events = t.processChunk(textChunk("Answer"))
+
+        val types = events.map { it.type }
+        val stopIdx = types.indexOf("content_block_stop")
+        val startIdx = types.lastIndexOf("content_block_start")
+        assertTrue(stopIdx < startIdx, "thinking block should stop before text block starts")
+
+        val textStart = events.filter { it.type == "content_block_start" }.first()
+        val startData = proxyJson.parseToJsonElement(textStart.data).jsonObject
+        assertEquals("text", startData["content_block"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `collected thinking blocks contain full reasoning text`() {
+        val t = translator()
+        t.processChunk(reasoningChunk("alpha "))
+        t.processChunk(reasoningChunk("beta"))
+        t.processChunk(textChunk("Answer"))
+        t.processChunk(finishChunk("stop"))
+        t.finish()
+
+        val blocks = t.collectedThinkingBlocks()
+        assertEquals(1, blocks.size)
+        assertEquals("alpha beta", blocks[0]["thinking"]?.jsonPrimitive?.content)
+        assertEquals("test-model", blocks[0]["model"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `reasoning then tool call closes thinking block first`() {
+        val t = translator()
+        t.processChunk(reasoningChunk("I should use a tool"))
+
+        val events = t.processChunk(
+            ChatCompletionChunk(
+                id = "c1",
+                choices = listOf(
+                    ChunkChoice(
+                        delta = ChunkDelta(
+                            toolCalls = listOf(
+                                ChunkToolCall(index = 0, id = "call_1", function = ChunkFunctionCall(name = "search"))
+                            )
+                        ),
+                    )
+                ),
+            )
+        )
+
+        val types = events.map { it.type }
+        val stopIdx = types.indexOf("content_block_stop")
+        val startIdx = types.indexOf("content_block_start")
+        assertTrue(stopIdx < startIdx, "thinking block should be stopped before tool block starts")
     }
 }

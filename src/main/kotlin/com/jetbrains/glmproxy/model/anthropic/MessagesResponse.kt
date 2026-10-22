@@ -20,6 +20,7 @@ data class MessagesResponse(
 data class ResponseContentBlock(
     val type: String,
     val text: String? = null,
+    val thinking: String? = null,
     val id: String? = null,
     val name: String? = null,
     val input: JsonElement? = null,
