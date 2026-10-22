@@ -2,9 +2,19 @@ package com.jetbrains.glmproxy.translate
 
 import com.jetbrains.glmproxy.model.anthropic.SseEvent
 import com.jetbrains.glmproxy.model.openai.ChatCompletionChunk
+import com.jetbrains.glmproxy.model.openai.ChatUsage
 import com.jetbrains.glmproxy.model.openai.ChunkToolCall
 import com.jetbrains.glmproxy.server.proxyJson
 import kotlinx.serialization.json.*
+import java.time.Instant
+
+/** JSON line persisted per completed thinking block. */
+internal fun thinkingBlockJson(text: String, model: String): JsonObject = buildJsonObject {
+    put("type", "thinking")
+    put("thinking", text)
+    put("model", model)
+    put("saved_at", Instant.now().toString())
+}
 
 class StreamTranslator(
     private val requestModel: String,
@@ -13,7 +23,16 @@ class StreamTranslator(
     private var started = false
     private var currentContentIndex = 0
     private var textBlockOpen = false
+    private var thinkingBlockOpen = false
+    private val thinkingBuffer = StringBuilder()
+    private val thinkingBlocks = mutableListOf<JsonObject>()
     private val activeToolCalls = mutableMapOf<Int, ToolCallAccumulator>()
+    // stop_reason/usage of the finished turn. Anthropic requires message_delta
+    // (which carries them) after all content_block_stop events, but OpenAI sends
+    // usage on a separate trailing chunk with empty choices, so they are stashed
+    // here and emitted by finish() instead of on the finish_reason chunk.
+    private var pendingStopReason: String? = null
+    private var pendingUsage: ChatUsage? = null
     private var finished = false
 
     private data class ToolCallAccumulator(
@@ -27,8 +46,9 @@ class StreamTranslator(
         if (finished) return emptyList()
         val events = mutableListOf<SseEvent>()
         val choice = chunk.choices.firstOrNull() ?: run {
+            // usage-only chunk at the end of stream: keep the authoritative numbers
             if (chunk.usage != null) {
-                // usage-only chunk at the end of stream
+                pendingUsage = chunk.usage
             }
             return events
         }
@@ -39,7 +59,18 @@ class StreamTranslator(
             started = true
         }
 
+        delta.reasoningContent?.takeIf { it.isNotEmpty() }?.let { reasoning ->
+            if (!thinkingBlockOpen) {
+                closeTextBlock(events)
+                events.add(contentBlockStart(currentContentIndex, thinkingBlock()))
+                thinkingBlockOpen = true
+            }
+            thinkingBuffer.append(reasoning)
+            events.add(thinkingDelta(currentContentIndex, reasoning))
+        }
+
         if (delta.content != null) {
+            closeThinkingBlock(events)
             if (!textBlockOpen) {
                 events.add(contentBlockStart(currentContentIndex, textBlock()))
                 textBlockOpen = true
@@ -52,12 +83,13 @@ class StreamTranslator(
         }
 
         if (choice.finishReason != null) {
-            events.addAll(finishWithReason(choice.finishReason, chunk.usage))
+            events.addAll(stashFinish(choice.finishReason, chunk.usage))
         }
 
         return events
     }
 
+    /** Emits message_delta/message_stop for a stream that has ended. Idempotent. */
     fun finish(): List<SseEvent> {
         if (finished) return emptyList()
         val events = mutableListOf<SseEvent>()
@@ -72,30 +104,28 @@ class StreamTranslator(
             return events
         }
 
-        if (textBlockOpen) {
-            events.add(contentBlockStop(currentContentIndex))
-            textBlockOpen = false
-        }
+        closeThinkingBlock(events)
+        closeTextBlock(events)
         for ((_, acc) in activeToolCalls) {
             events.add(contentBlockStop(acc.contentIndex))
         }
         activeToolCalls.clear()
 
-        events.add(messageDelta("end_turn", null))
+        events.add(messageDelta(pendingStopReason ?: "end_turn", pendingUsage))
         events.add(messageStop())
         finished = true
         return events
     }
 
+    /** Thinking blocks completed during the stream, for local persistence. */
+    fun collectedThinkingBlocks(): List<JsonObject> = thinkingBlocks.toList()
+
     private fun processToolCallDelta(tc: ChunkToolCall): List<SseEvent> {
         val events = mutableListOf<SseEvent>()
 
         if (tc.id != null) {
-            if (textBlockOpen) {
-                events.add(contentBlockStop(currentContentIndex))
-                currentContentIndex++
-                textBlockOpen = false
-            }
+            closeTextBlock(events)
+            closeThinkingBlock(events)
 
             val name = tc.function?.name ?: ""
             val acc = ToolCallAccumulator(
@@ -127,36 +157,49 @@ class StreamTranslator(
         return events
     }
 
-    private fun finishWithReason(
-        finishReason: String,
-        usage: com.jetbrains.glmproxy.model.openai.ChatUsage?,
-    ): List<SseEvent> {
+    /**
+     * Records the stop reason and usage of the finished turn. The message_delta
+     * carrying them is deferred to finish() so usage from the trailing usage-only
+     * chunk (sent after finish_reason) is included.
+     */
+    private fun stashFinish(finishReason: String, usage: ChatUsage?): List<SseEvent> {
         val events = mutableListOf<SseEvent>()
 
-        if (textBlockOpen) {
-            events.add(contentBlockStop(currentContentIndex))
-            textBlockOpen = false
-        }
+        closeThinkingBlock(events)
+        closeTextBlock(events)
         for ((_, acc) in activeToolCalls) {
             events.add(contentBlockStop(acc.contentIndex))
         }
         activeToolCalls.clear()
 
-        val stopReason = when (finishReason) {
+        pendingStopReason = when (finishReason) {
             "stop" -> "end_turn"
             "tool_calls" -> "tool_use"
             "length" -> "max_tokens"
             else -> "end_turn"
         }
+        if (usage != null) pendingUsage = usage
 
-        events.add(messageDelta(stopReason, usage))
-        events.add(messageStop())
-        finished = true
         return events
     }
 
-    // SSE event builders
+    private fun closeTextBlock(events: MutableList<SseEvent>) {
+        if (!textBlockOpen) return
+        events.add(contentBlockStop(currentContentIndex))
+        currentContentIndex++
+        textBlockOpen = false
+    }
 
+    private fun closeThinkingBlock(events: MutableList<SseEvent>) {
+        if (!thinkingBlockOpen) return
+        events.add(contentBlockStop(currentContentIndex))
+        thinkingBlocks.add(thinkingBlockJson(thinkingBuffer.toString(), requestModel))
+        thinkingBuffer.clear()
+        currentContentIndex++
+        thinkingBlockOpen = false
+    }
+
+    // SSE event builders
     private fun messageStartEvent(): SseEvent {
         val data = buildJsonObject {
             put("type", "message_start")
@@ -198,6 +241,18 @@ class StreamTranslator(
         return SseEvent("content_block_delta", proxyJson.encodeToString(JsonElement.serializer(), data))
     }
 
+    private fun thinkingDelta(index: Int, text: String): SseEvent {
+        val data = buildJsonObject {
+            put("type", "content_block_delta")
+            put("index", index)
+            put("delta", buildJsonObject {
+                put("type", "thinking_delta")
+                put("thinking", text)
+            })
+        }
+        return SseEvent("content_block_delta", proxyJson.encodeToString(JsonElement.serializer(), data))
+    }
+
     private fun inputJsonDelta(index: Int, partialJson: String): SseEvent {
         val data = buildJsonObject {
             put("type", "content_block_delta")
@@ -220,7 +275,7 @@ class StreamTranslator(
 
     private fun messageDelta(
         stopReason: String,
-        usage: com.jetbrains.glmproxy.model.openai.ChatUsage?,
+        usage: ChatUsage?,
     ): SseEvent {
         val data = buildJsonObject {
             put("type", "message_delta")
@@ -241,6 +296,11 @@ class StreamTranslator(
     private fun textBlock(): JsonObject = buildJsonObject {
         put("type", "text")
         put("text", "")
+    }
+
+    private fun thinkingBlock(): JsonObject = buildJsonObject {
+        put("type", "thinking")
+        put("thinking", "")
     }
 
     private fun toolUseBlock(id: String, name: String): JsonObject = buildJsonObject {
