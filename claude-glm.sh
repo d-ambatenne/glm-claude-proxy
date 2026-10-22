@@ -36,7 +36,7 @@ else
     echo "Starting proxy on port ${PORT} (logs: ${LOG_FILE})..." >&2
     # set -m puts the background job in its own process group for clean shutdown.
     set -m
-    (cd "${SCRIPT_DIR}" && PROXY_PORT="${PORT}" exec ./kotlin run) >"${LOG_FILE}" 2>&1 &
+    (cd "${SCRIPT_DIR}" && PROXY_PORT="${PORT}" exec ./run.sh) >"${LOG_FILE}" 2>&1 &
     PROXY_PID=$!
     set +m
 
@@ -60,4 +60,4 @@ unset ANTHROPIC_API_KEY
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 
 # Not exec: we need to stay alive to stop the proxy when claude exits.
-claude "$@"
+CLAUDE_CODE_MAX_CONTEXT_TOKENS=1000000 claude "$@"

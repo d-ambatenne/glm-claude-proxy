@@ -62,6 +62,10 @@ All settings live in [`src/main/resources/application.conf`](src/main/resources/
 | `upstream.apiKey`      | `UPSTREAM_API_KEY`           | *(committed demo key)*               | Bearer token sent to the upstream.                                    |
 | `upstream.defaultModel`| `UPSTREAM_DEFAULT_MODEL`     | `hetzner/zai-org/GLM-5.2-FP8`        | Model reported by `/v1/models`.                                         |
 | `upstream.timeoutSeconds`| `UPSTREAM_TIMEOUT_SECONDS` | `300`                                | Upstream request timeout in seconds.                                   |
+| `upstream.temperature` | `UPSTREAM_TEMPERATURE`       | *(upstream default)*                 | Sampling temperature applied when the request omits one (Claude Code never sends it). |
+| `upstream.topP`        | `UPSTREAM_TOP_P`             | *(upstream default)*                 | `top_p` applied when the request omits one.                            |
+| `upstream.forwardEffort`| `UPSTREAM_FORWARD_EFFORT`   | `false`                              | Forward the client's `output_config.effort` upstream as `reasoning_effort`. Enable only if the upstream accepts it. |
+| `thinking.saveDirectory`| `THINKING_SAVE_DIRECTORY`   | *(disabled)*                         | Directory where GLM thinking blocks are saved locally as JSONL, one file per request. |
 | `debug.logRequests`    | `PROXY_DEBUG_LOG_REQUESTS`   | `true`                               | Log every request after it completes as `METHOD path -> status`.      |
 | `debug.logBodies`      | `PROXY_DEBUG_LOG_BODIES`     | `false`                              | Log raw JSON bodies (`>>>` sent upstream, `<<<` received downstream).  |
 
