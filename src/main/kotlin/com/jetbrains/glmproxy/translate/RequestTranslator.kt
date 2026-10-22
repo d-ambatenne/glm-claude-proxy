@@ -8,7 +8,12 @@ import kotlinx.serialization.json.*
 
 object RequestTranslator {
 
-    fun translate(request: MessagesRequest): ChatCompletionRequest {
+    fun translate(
+        request: MessagesRequest,
+        defaultTemperature: Double? = null,
+        defaultTopP: Double? = null,
+        forwardEffort: Boolean = false,
+    ): ChatCompletionRequest {
         val messages = mutableListOf<ChatMessage>()
 
         translateSystem(request.system)?.let { messages.add(it) }
@@ -21,13 +26,21 @@ object RequestTranslator {
             model = request.model,
             messages = messages,
             maxTokens = request.maxTokens,
-            temperature = request.temperature,
-            topP = request.topP,
+            // Requests from Claude Code carry no temperature/top_p; fall back to config.
+            temperature = request.temperature ?: defaultTemperature,
+            topP = request.topP ?: defaultTopP,
+            reasoningEffort = translateEffort(request.outputConfig, forwardEffort),
             stop = translateStop(request.stopSequences),
             stream = request.stream,
             tools = translateTools(request.tools),
             toolChoice = translateToolChoice(request.toolChoice),
         )
+    }
+
+    private fun translateEffort(outputConfig: JsonObject?, forward: Boolean): String? {
+        if (!forward) return null
+        val effort = outputConfig?.get("effort")?.jsonPrimitive?.contentOrNull ?: return null
+        return effort
     }
 
     private fun translateSystem(system: JsonElement?): ChatMessage? {

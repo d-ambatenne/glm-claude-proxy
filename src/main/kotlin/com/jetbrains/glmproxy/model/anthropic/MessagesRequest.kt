@@ -18,6 +18,8 @@ data class MessagesRequest(
     val tools: List<Tool>? = null,
     @SerialName("tool_choice") val toolChoice: JsonElement? = null,
     val metadata: JsonObject? = null,
+    // Reasoning-effort knob sent by Claude Code ({"effort": "high"}); otherwise dropped.
+    @SerialName("output_config") val outputConfig: JsonObject? = null,
 )
 
 @Serializable

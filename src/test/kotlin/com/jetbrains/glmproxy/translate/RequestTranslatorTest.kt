@@ -249,6 +249,96 @@ class RequestTranslatorTest {
     }
 
     @Test
+    fun `config default temperature used when request omits one`() {
+        val request = MessagesRequest(
+            model = "m",
+            maxTokens = 100,
+            messages = listOf(
+                com.jetbrains.glmproxy.model.anthropic.Message("user", JsonPrimitive("Hi"))
+            ),
+        )
+        val result = RequestTranslator.translate(request, defaultTemperature = 0.6)
+        assertEquals(0.6, result.temperature)
+    }
+
+    @Test
+    fun `config default top_p used when request omits one`() {
+        val request = MessagesRequest(
+            model = "m",
+            maxTokens = 100,
+            messages = listOf(
+                com.jetbrains.glmproxy.model.anthropic.Message("user", JsonPrimitive("Hi"))
+            ),
+        )
+        val result = RequestTranslator.translate(request, defaultTopP = 0.95)
+        assertEquals(0.95, result.topP)
+    }
+
+    @Test
+    fun `request top_p overrides config default`() {
+        val request = MessagesRequest(
+            model = "m",
+            maxTokens = 100,
+            messages = listOf(
+                com.jetbrains.glmproxy.model.anthropic.Message("user", JsonPrimitive("Hi"))
+            ),
+            topP = 0.5,
+        )
+        val result = RequestTranslator.translate(request, defaultTopP = 0.95)
+        assertEquals(0.5, result.topP)
+    }
+
+    @Test
+    fun `request temperature overrides config default`() {
+        val request = MessagesRequest(
+            model = "m",
+            maxTokens = 100,
+            messages = listOf(
+                com.jetbrains.glmproxy.model.anthropic.Message("user", JsonPrimitive("Hi"))
+            ),
+            temperature = 0.2,
+        )
+        val result = RequestTranslator.translate(request, defaultTemperature = 0.6)
+        assertEquals(0.2, result.temperature)
+    }
+
+    @Test
+    fun `effort forwarded as reasoning_effort when enabled`() {
+        val request = proxyJson.decodeFromString<MessagesRequest>("""
+        {
+            "model": "m",
+            "max_tokens": 100,
+            "output_config": {"effort": "high"},
+            "messages": [{"role": "user", "content": "Hi"}]
+        }
+        """)
+        val result = RequestTranslator.translate(request, forwardEffort = true)
+        assertEquals("high", result.reasoningEffort)
+    }
+
+    @Test
+    fun `effort dropped when forwarding disabled or missing`() {
+        val withEffort = proxyJson.decodeFromString<MessagesRequest>("""
+        {
+            "model": "m",
+            "max_tokens": 100,
+            "output_config": {"effort": "high"},
+            "messages": [{"role": "user", "content": "Hi"}]
+        }
+        """)
+        assertNull(RequestTranslator.translate(withEffort, forwardEffort = false).reasoningEffort)
+
+        val withoutEffort = MessagesRequest(
+            model = "m",
+            maxTokens = 100,
+            messages = listOf(
+                com.jetbrains.glmproxy.model.anthropic.Message("user", JsonPrimitive("Hi"))
+            ),
+        )
+        assertNull(RequestTranslator.translate(withoutEffort, forwardEffort = true).reasoningEffort)
+    }
+
+    @Test
     fun `full multi-turn tool use conversation`() {
         val request = proxyJson.decodeFromString<MessagesRequest>("""
         {
