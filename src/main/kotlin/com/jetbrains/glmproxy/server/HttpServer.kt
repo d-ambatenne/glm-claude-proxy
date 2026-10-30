@@ -35,6 +35,18 @@ fun Application.configureServer(config: ProxyConfig, client: LiteLlmClient) {
     install(StatusPages) {
         exception<Throwable> { call, cause ->
             if (cause is kotlinx.coroutines.CancellationException) throw cause
+            // A client that disconnects mid-stream makes the SSE writes fail with
+            // ChannelWriteException ("Cannot write to channel"). Nothing can be sent
+            // back over a dead socket, and the upstream stream is torn down by
+            // coroutine cancellation, so log it at debug level instead of warning
+            // about a 500 the client never receives.
+            if (cause is io.ktor.util.cio.ChannelWriteException) {
+                requestLogger.debug("{} {} -> client disconnected: {}",
+                    call.request.httpMethod.value,
+                    call.request.path(),
+                    cause.message ?: "Cannot write to channel")
+                return@exception
+            }
             requestLogger.warn("{} {} -> 500 {}: {}",
                 call.request.httpMethod.value,
                 call.request.path(),

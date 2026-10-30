@@ -6,6 +6,7 @@ import com.typesafe.config.ConfigFactory
 data class ProxyConfig(
     val server: ServerConfig,
     val upstream: UpstreamConfig,
+    val thinking: ThinkingConfig,
     val debug: DebugConfig,
 ) {
     companion object {
@@ -20,6 +21,15 @@ data class ProxyConfig(
                 timeoutSeconds = config.getLong("upstream.timeoutSeconds"),
                 insecureSkipTlsVerify = config.hasPath("upstream.insecureSkipTlsVerify") &&
                     config.getBoolean("upstream.insecureSkipTlsVerify"),
+                temperature = if (config.hasPath("upstream.temperature")) config.getDouble("upstream.temperature") else null,
+                topP = if (config.hasPath("upstream.topP")) config.getDouble("upstream.topP") else null,
+                forwardEffort = if (config.hasPath("upstream.forwardEffort")) config.getBoolean("upstream.forwardEffort") else false,
+            ),
+            thinking = ThinkingConfig(
+                saveDirectory = if (config.hasPath("thinking.saveDirectory")) {
+                    // Blank overrides (e.g. THINKING_SAVE_DIRECTORY="") disable saving.
+                    config.getString("thinking.saveDirectory").takeIf { it.isNotBlank() }
+                } else null,
             ),
             debug = DebugConfig(
                 logRequests = if (config.hasPath("debug.logRequests")) config.getBoolean("debug.logRequests") else true,
@@ -37,7 +47,16 @@ data class UpstreamConfig(
     val defaultModel: String,
     val timeoutSeconds: Long,
     val insecureSkipTlsVerify: Boolean = false,
+    /** Sampling temperature applied when the client request omits one. */
+    val temperature: Double? = null,
+    /** top_p applied when the client request omits one. */
+    val topP: Double? = null,
+    /** Forward the client's output_config.effort to the upstream as reasoning_effort. */
+    val forwardEffort: Boolean = false,
 )
+
+/** Where completed thinking blocks are persisted locally; disabled when saveDirectory is null. */
+data class ThinkingConfig(val saveDirectory: String? = null)
 
 data class DebugConfig(
     val logRequests: Boolean,

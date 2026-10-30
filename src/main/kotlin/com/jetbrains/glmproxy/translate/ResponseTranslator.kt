@@ -16,6 +16,13 @@ object ResponseTranslator {
         val message = choice.message
         val contentBlocks = mutableListOf<ResponseContentBlock>()
 
+        // GLM puts the thinking phase in reasoning_content; surface it as a
+        // thinking block before the answer text.
+        val reasoning = message.reasoningContent
+        if (!reasoning.isNullOrEmpty()) {
+            contentBlocks.add(ResponseContentBlock(type = "thinking", thinking = reasoning))
+        }
+
         val textContent = message.content?.let {
             proxyJson.decodeFromJsonElement(JsonElement.serializer(), it)
         }
